@@ -22,55 +22,52 @@ const Options = struct {
     temperature: ?u32 = null, // -t or --temperature
     preset: ?[]const u8 = null, // -p or --preset
     mode: ?graindisplay.DisplayMode = null, // -m or --mode (normal, monochrome, red-green)
+    font_scale: ?f64 = null, // --font-scale or --font-scale-175
 };
 
 // Parse command line arguments into options.
 //
 // Supports both short flags (-f) and long flags (--full).
 // Returns null if help was requested or parsing failed.
-fn parse_args(
+fn parse_args_list(
     allocator: std.mem.Allocator,
+    list: []const []const u8,
 ) !?Options {
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
-
     var opts = Options{};
+    if (list.len == 0) return opts;
 
-    // Skip program name
-    _ = args.skip();
-
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "-i") or
-            std.mem.eql(u8, arg, "--interactive"))
-        {
+    var i: usize = 1; // skip program name
+    while (i < list.len) : (i += 1) {
+        const arg = list[i];
+        if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--interactive")) {
             opts.interactive = true;
-        } else if (std.mem.eql(u8, arg, "-f") or
-            std.mem.eql(u8, arg, "--full"))
-        {
+        } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--full")) {
             opts.full = true;
         } else if (std.mem.eql(u8, arg, "--enable")) {
             opts.enable = true;
         } else if (std.mem.eql(u8, arg, "--disable")) {
             opts.enable = false;
-        } else if (std.mem.eql(u8, arg, "-t") or
-            std.mem.eql(u8, arg, "--temperature"))
-        {
-            const temp_str = args.next() orelse {
+        } else if (std.mem.eql(u8, arg, "-t") or std.mem.eql(u8, arg, "--temperature")) {
+            i += 1;
+            if (i >= list.len) {
                 std.debug.print("Error: --temperature requires a value\n", .{});
                 return null;
-            };
-            opts.temperature = try std.fmt.parseInt(u32, temp_str, 10);
-        } else if (std.mem.eql(u8, arg, "-p") or
-            std.mem.eql(u8, arg, "--preset"))
-        {
-            opts.preset = args.next();
-        } else if (std.mem.eql(u8, arg, "-m") or
-            std.mem.eql(u8, arg, "--mode"))
-        {
-            const mode_str = args.next() orelse {
+            }
+            opts.temperature = try std.fmt.parseInt(u32, list[i], 10);
+        } else if (std.mem.eql(u8, arg, "-p") or std.mem.eql(u8, arg, "--preset")) {
+            i += 1;
+            if (i >= list.len) {
+                std.debug.print("Error: --preset requires a value\n", .{});
+                return null;
+            }
+            opts.preset = list[i];
+        } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--mode")) {
+            i += 1;
+            if (i >= list.len) {
                 std.debug.print("Error: --mode requires a value\n", .{});
                 return null;
-            };
+            }
+            const mode_str = list[i];
             if (std.mem.eql(u8, mode_str, "normal")) {
                 opts.mode = .normal;
             } else if (std.mem.eql(u8, mode_str, "monochrome")) {
@@ -82,9 +79,16 @@ fn parse_args(
                 std.debug.print("Available modes: normal, monochrome, red-green\n", .{});
                 return null;
             }
-        } else if (std.mem.eql(u8, arg, "--help") or
-            std.mem.eql(u8, arg, "-h"))
-        {
+        } else if (std.mem.eql(u8, arg, "--font-scale")) {
+            i += 1;
+            if (i >= list.len) {
+                std.debug.print("Error: --font-scale requires a value\n", .{});
+                return null;
+            }
+            opts.font_scale = try std.fmt.parseFloat(f64, list[i]);
+        } else if (std.mem.eql(u8, arg, "--font-scale-175")) {
+            opts.font_scale = 1.75;
+        } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             try print_usage();
             return null;
         } else {
@@ -94,7 +98,24 @@ fn parse_args(
         }
     }
 
+    _ = allocator;
     return opts;
+}
+
+fn parse_args(
+    allocator: std.mem.Allocator,
+) !?Options {
+    var args_iter = try std.process.argsWithAllocator(allocator);
+    defer args_iter.deinit();
+
+    var list = std.ArrayList([]const u8).init(allocator);
+    defer list.deinit();
+
+    while (args_iter.next()) |arg| {
+        try list.append(arg);
+    }
+
+    return try parse_args_list(allocator, list.items);
 }
 
 // Print usage information.
@@ -115,6 +136,8 @@ fn print_usage() !void {
         \\  -t, --temperature TEMP  Set color temperature (1700-4700K)
         \\  -p, --preset PRESET     Apply preset
         \\  -m, --mode MODE         Set color mode (normal, monochrome, red-green)
+        \\      --font-scale VALUE  Set Wayland text scaling factor (e.g. 1.75)
+        \\      --font-scale-175    Shortcut for 1.75x text scaling
         \\      --help              Show this help
         \\
         \\Presets:
@@ -134,6 +157,8 @@ fn print_usage() !void {
         \\  graindisplay --mode red-green
         \\  graindisplay --temperature 3000
         \\  graindisplay --enable
+        \\  graindisplay --font-scale 1.75
+        \\  graindisplay --font-scale-175
         \\
         \\
     , .{});
@@ -142,6 +167,7 @@ fn print_usage() !void {
 // Run interactive mode, prompting for each value.
 fn run_interactive(
     allocator: std.mem.Allocator,
+    client: *graindisplay.Client,
 ) !void {
     const stdin_fd = std.posix.STDIN_FILENO;
     const stdout_fd = std.posix.STDOUT_FILENO;
@@ -149,26 +175,31 @@ fn run_interactive(
     try writeStr(stdout_fd, "Welcome to graindisplay! Let's configure your warm display.\n\n");
 
     // Read current config first
-    const current = try graindisplay.read_config(allocator);
+    const current = try client.readNightLight();
+    const current_interface = try client.readInterface();
     try writeStr(stdout_fd, "Current settings:\n");
     const enabled_str = try std.fmt.allocPrint(allocator, "  Enabled: {}\n", .{current.enabled});
     defer allocator.free(enabled_str);
     try writeStr(stdout_fd, enabled_str);
-    
+
     const temp_str = try std.fmt.allocPrint(allocator, "  Temperature: {}K\n", .{current.temperature});
     defer allocator.free(temp_str);
     try writeStr(stdout_fd, temp_str);
-    
+
     const schedule_str = try std.fmt.allocPrint(allocator, "  Schedule automatic: {}\n\n", .{current.schedule_automatic});
     defer allocator.free(schedule_str);
     try writeStr(stdout_fd, schedule_str);
+
+    const scale_str = try std.fmt.allocPrint(allocator, "Current text scaling: {d:.2}x\n\n", .{current_interface.text_scale});
+    defer allocator.free(scale_str);
+    try writeStr(stdout_fd, scale_str);
 
     // Enable/disable
     const prompt_enabled = if (current.enabled) "y" else "n";
     const enable_prompt = try std.fmt.allocPrint(allocator, "Enable Night Light? (y/n, default: {s}): ", .{prompt_enabled});
     defer allocator.free(enable_prompt);
     try writeStr(stdout_fd, enable_prompt);
-    
+
     var stdin_buf: [256]u8 = undefined;
     const enable_bytes = try std.posix.read(stdin_fd, &stdin_buf);
     const enable_line = std.mem.trim(u8, stdin_buf[0..enable_bytes], &std.ascii.whitespace);
@@ -178,10 +209,28 @@ fn run_interactive(
     const temp_prompt = try std.fmt.allocPrint(allocator, "Temperature in Kelvins (1700-4700, default: {}): ", .{current.temperature});
     defer allocator.free(temp_prompt);
     try writeStr(stdout_fd, temp_prompt);
-    
+
     const temp_bytes = try std.posix.read(stdin_fd, &stdin_buf);
     const temp_line = std.mem.trim(u8, stdin_buf[0..temp_bytes], &std.ascii.whitespace);
     const temperature = if (temp_line.len == 0) current.temperature else try std.fmt.parseInt(u32, temp_line, 10);
+
+    // Text scaling
+    const scale_prompt = try std.fmt.allocPrint(
+        allocator,
+        "Text scaling factor (default: {d:.2}) [press enter to keep]: ",
+        .{current_interface.text_scale},
+    );
+    defer allocator.free(scale_prompt);
+    try writeStr(stdout_fd, scale_prompt);
+
+    const scale_bytes = try std.posix.read(stdin_fd, &stdin_buf);
+    const scale_line = std.mem.trim(u8, stdin_buf[0..scale_bytes], &std.ascii.whitespace);
+    var interface_config = current_interface;
+    var interface_changed = false;
+    if (scale_line.len != 0) {
+        interface_config.text_scale = try std.fmt.parseFloat(f64, scale_line);
+        interface_changed = true;
+    }
 
     // Apply the configuration
     const config = graindisplay.NightLightConfig{
@@ -192,8 +241,14 @@ fn run_interactive(
         .schedule_to = current.schedule_to,
     };
 
-    try graindisplay.apply_config(allocator, config);
+    try client.applyNightLight(config);
+    if (interface_changed) {
+        try client.applyInterface(interface_config);
+    }
     try writeStr(stdout_fd, "\n✅ Configuration applied!\n");
+    if (interface_changed) {
+        try writeStr(stdout_fd, "Text scaling updated successfully.\n");
+    }
 }
 
 // Helper to write string to file descriptor.
@@ -202,19 +257,20 @@ fn writeStr(fd: std.posix.fd_t, str: []const u8) !void {
 }
 
 // Show full current configuration.
-fn show_full(allocator: std.mem.Allocator) !void {
+fn show_full(allocator: std.mem.Allocator, client: *graindisplay.Client) !void {
     const stdout_fd = std.posix.STDOUT_FILENO;
-    const config = try graindisplay.read_config(allocator);
+    const config = try client.readNightLight();
+    const interface_config = try client.readInterface();
 
     try writeStr(stdout_fd, "Current Night Light Configuration:\n");
     const enabled_line = try std.fmt.allocPrint(allocator, "  Enabled: {}\n", .{config.enabled});
     defer allocator.free(enabled_line);
     try writeStr(stdout_fd, enabled_line);
-    
+
     const temp_prefix = try std.fmt.allocPrint(allocator, "  Temperature: {}K (", .{config.temperature});
     defer allocator.free(temp_prefix);
     try writeStr(stdout_fd, temp_prefix);
-    
+
     if (config.temperature <= 2500) {
         try writeStr(stdout_fd, "very warm");
     } else if (config.temperature <= 3000) {
@@ -225,20 +281,24 @@ fn show_full(allocator: std.mem.Allocator) !void {
         try writeStr(stdout_fd, "cool");
     }
     try writeStr(stdout_fd, ")\n");
-    
+
     const schedule_auto = try std.fmt.allocPrint(allocator, "  Schedule automatic: {}\n", .{config.schedule_automatic});
     defer allocator.free(schedule_auto);
     try writeStr(stdout_fd, schedule_auto);
-    
+
     if (!config.schedule_automatic) {
         const from_line = try std.fmt.allocPrint(allocator, "  Schedule from: {d:.1}h\n", .{config.schedule_from});
         defer allocator.free(from_line);
         try writeStr(stdout_fd, from_line);
-        
+
         const to_line = try std.fmt.allocPrint(allocator, "  Schedule to: {d:.1}h\n", .{config.schedule_to});
         defer allocator.free(to_line);
         try writeStr(stdout_fd, to_line);
     }
+
+    const scale_line = try std.fmt.allocPrint(allocator, "\nCurrent text scaling: {d:.2}x\n", .{interface_config.text_scale});
+    defer allocator.free(scale_line);
+    try writeStr(stdout_fd, scale_line);
 }
 
 pub fn main() !void {
@@ -247,22 +307,24 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     const opts = try parse_args(allocator) orelse return;
+    var client = graindisplay.open(allocator);
 
     // Handle different modes
     if (opts.full) {
-        try show_full(allocator);
+        try show_full(allocator, &client);
         return;
     }
 
     if (opts.interactive) {
-        try run_interactive(allocator);
+        try run_interactive(allocator, &client);
         return;
     }
 
     // Non-interactive mode: apply settings from command line
     var display_config = graindisplay.DisplayConfig{
-        .night_light = try graindisplay.read_config(allocator),
+        .night_light = try client.readNightLight(),
     };
+    var interface_config = try client.readInterface();
 
     // Apply preset if specified
     if (opts.preset) |preset| {
@@ -295,14 +357,41 @@ pub fn main() !void {
     if (opts.mode) |mode| {
         display_config.mode = mode;
     }
+    if (opts.font_scale) |scale| {
+        if (scale <= 0) {
+            std.debug.print("Error: text scaling must be positive\n", .{});
+            return;
+        }
+        interface_config.text_scale = scale;
+    }
 
     // Apply the configuration
-    try graindisplay.apply_display_config(allocator, display_config);
+    try client.applyDisplay(display_config);
+    try client.applyInterface(interface_config);
 
     const stdout_fd = std.posix.STDOUT_FILENO;
     try writeStr(stdout_fd, "✅ Configuration applied!\n");
+    if (opts.font_scale != null) {
+        try writeStr(stdout_fd, "Text scaling updated.\n");
+    }
     if (display_config.mode != .normal) {
         try writeStr(stdout_fd, "Note: Special color modes (monochrome/red-green) may require additional Wayland protocol support.\n");
     }
 }
 
+test "parse args list handles font scale" {
+    const args = [_][]const u8{ "graindisplay", "--font-scale", "1.75", "--enable" };
+    const opts = try parse_args_list(std.testing.allocator, &args);
+    try std.testing.expect(opts.enable != null and opts.enable.?);
+    try std.testing.expect(opts.font_scale != null);
+    try std.testing.expectEqual(@as(f64, 1.75), opts.font_scale.?);
+}
+
+test "parse args list handles presets and shortcuts" {
+    const args = [_][]const u8{ "graindisplay", "--preset", "most-warm", "--font-scale-175" };
+    const opts = try parse_args_list(std.testing.allocator, &args);
+    try std.testing.expect(opts.preset != null);
+    try std.testing.expectEqualStrings("most-warm", opts.preset.?);
+    try std.testing.expect(opts.font_scale != null);
+    try std.testing.expectEqual(@as(f64, 1.75), opts.font_scale.?);
+}

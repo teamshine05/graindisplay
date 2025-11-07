@@ -115,7 +115,7 @@ pub const most_warm: NightLightConfig = .{
     .temperature = 1700, // Warmest possible, like candlelight
     .schedule_automatic = false, // Always active when applied
     .schedule_from = 0.0, // All day
-    .schedule_to = 24.0,  // All night
+    .schedule_to = 24.0, // All night
 };
 
 // Daylight movie mode configuration.
@@ -137,9 +137,9 @@ pub const daylight_movie: NightLightConfig = .{
 // Beyond just temperature, we can control color channels and
 // grayscale modes for special purposes.
 pub const DisplayMode = enum {
-    normal,        // Standard color display
-    monochrome,    // Grayscale only (no color)
-    red_green,     // Red and green only, no blue (accessibility/colorblind)
+    normal, // Standard color display
+    monochrome, // Grayscale only (no color)
+    red_green, // Red and green only, no blue (accessibility/colorblind)
 };
 
 // Full display configuration including color mode.
@@ -160,3 +160,40 @@ pub const DisplayConfig = struct {
     green_intensity: f32 = 1.0,
 };
 
+// Interface preferences.
+//
+// Controls how GNOME renders fonts relative to their base size.
+// GNOME uses a scaling multiplier where 1.0 means "default size".
+// 1.75 means "increase fonts by 75%".
+pub const InterfaceConfig = struct {
+    text_scale: f64 = 1.0,
+};
+
+pub const default_interface: InterfaceConfig = .{
+    .text_scale = 1.0,
+};
+
+pub const text_scale_large: InterfaceConfig = .{
+    .text_scale = 1.25,
+};
+
+pub const text_scale_extra_large: InterfaceConfig = .{
+    .text_scale = 1.5,
+};
+
+pub const text_scale_very_large: InterfaceConfig = .{
+    .text_scale = 1.75,
+};
+
+pub const text_scale_max: InterfaceConfig = .{
+    .text_scale = 2.0,
+};
+
+// Comprehensive system configuration.
+//
+// Allows us to apply both display (color) and interface (font)
+// preferences in one call.
+pub const SystemConfig = struct {
+    display: DisplayConfig = .{},
+    interface: InterfaceConfig = .{},
+};

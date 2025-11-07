@@ -11,221 +11,484 @@
 const std = @import("std");
 const types = @import("types.zig");
 
-// GNOME settings schema for color/Night Light.
-//
-// This is the "address" where GNOME stores Night Light settings.
 const COLOR_SCHEMA = "org.gnome.settings-daemon.plugins.color";
+const INTERFACE_SCHEMA = "org.gnome.desktop.interface";
 
-// Read a boolean value from gsettings.
-//
-// Returns the value if successful, or an error if reading failed.
-// Does this make sense? We're asking gsettings "what is this setting?"
-// and it gives us back true or false.
-fn read_bool(allocator: std.mem.Allocator, key: []const u8) !bool {
-    const result = try exec_gsettings(allocator, &[_][]const u8{ "get", COLOR_SCHEMA, key });
-    defer allocator.free(result);
+pub const CommandRunner = struct {
+    runFn: *const fn (
+        allocator: std.mem.Allocator,
+        args: []const []const u8,
+    ) anyerror![]u8,
 
-    // gsettings returns "true" or "false" as strings
-    if (std.mem.eql(u8, std.mem.trim(u8, result, &std.ascii.whitespace), "true")) {
-        return true;
-    } else {
-        return false;
+    pub fn run(self: CommandRunner, allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
+        return self.runFn(allocator, args);
     }
-}
+};
 
-// Write a boolean value to gsettings.
-//
-// This actually changes the setting! We're telling gsettings
-// "set this key to this value, please."
-fn write_bool(key: []const u8, value: bool) !void {
-    const value_str = if (value) "true" else "false";
-    _ = try exec_gsettings(null, &[_][]const u8{ "set", COLOR_SCHEMA, key, value_str });
-}
-
-// Read a uint32 value from gsettings.
-fn read_u32(allocator: std.mem.Allocator, key: []const u8) !u32 {
-    const result = try exec_gsettings(allocator, &[_][]const u8{ "get", COLOR_SCHEMA, key });
-    defer allocator.free(result);
-
-    // gsettings returns numbers as "uint32 2700" - we need to extract the number part
-    var trimmed = std.mem.trim(u8, result, &std.ascii.whitespace);
-    
-    // Skip "uint32 " prefix if present (or "int32 " or just the number)
-    if (std.mem.indexOf(u8, trimmed, " ")) |space_idx| {
-        trimmed = trimmed[space_idx + 1 ..];
-        trimmed = std.mem.trim(u8, trimmed, &std.ascii.whitespace);
-    }
-    
-    if (trimmed.len == 0) {
-        return error.InvalidFormat;
-    }
-    
-    return try std.fmt.parseInt(u32, trimmed, 10);
-}
-
-// Write a uint32 value to gsettings.
-fn write_u32(key: []const u8, value: u32) !void {
-    const value_str = try std.fmt.allocPrint(std.heap.page_allocator, "{}", .{value});
-    defer std.heap.page_allocator.free(value_str);
-    _ = try exec_gsettings(null, &[_][]const u8{ "set", COLOR_SCHEMA, key, value_str });
-}
-
-// Read a double (f64) value from gsettings.
-fn read_f64(allocator: std.mem.Allocator, key: []const u8) !f64 {
-    const result = try exec_gsettings(allocator, &[_][]const u8{ "get", COLOR_SCHEMA, key });
-    defer allocator.free(result);
-
-    // gsettings returns numbers as "double 18.0" - we need to extract the number part
-    var trimmed = std.mem.trim(u8, result, &std.ascii.whitespace);
-    
-    // Skip type prefix if present (like "double " or "float ")
-    if (std.mem.indexOf(u8, trimmed, " ")) |space_idx| {
-        trimmed = trimmed[space_idx + 1 ..];
-        trimmed = std.mem.trim(u8, trimmed, &std.ascii.whitespace);
-    }
-    
-    if (trimmed.len == 0) {
-        return error.InvalidFormat;
-    }
-    
-    return try std.fmt.parseFloat(f64, trimmed);
-}
-
-// Write a double (f64) value to gsettings.
-fn write_f64(key: []const u8, value: f64) !void {
-    const value_str = try std.fmt.allocPrint(std.heap.page_allocator, "{d}", .{value});
-    defer std.heap.page_allocator.free(value_str);
-    _ = try exec_gsettings(null, &[_][]const u8{ "set", COLOR_SCHEMA, key, value_str });
-}
-
-// Execute gsettings command and return output.
-//
-// This is our helper function that runs gsettings and captures
-// what it prints. We use it for reading values.
-//
-// Why this pattern? Because gsettings is an external program,
-// we need to run it as a subprocess and read its output.
-fn exec_gsettings(
-    allocator: ?std.mem.Allocator,
+fn systemRun(
+    allocator: std.mem.Allocator,
     args: []const []const u8,
-) ![]const u8 {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const arena_allocator = arena.allocator();
-
-    // Build the full command: ["gsettings", ...args]
-    var full_args = std.ArrayList([]const u8).initCapacity(arena_allocator, 16) catch return error.OutOfMemory;
-    try full_args.append(arena_allocator, "gsettings");
-    try full_args.appendSlice(arena_allocator, args);
-
-    // Run gsettings and capture output
+) ![]u8 {
     const result = try std.process.Child.run(.{
-        .allocator = arena_allocator,
-        .argv = full_args.items,
-        .max_output_bytes = 1024,
+        .allocator = allocator,
+        .argv = args,
+        .max_output_bytes = 2048,
     });
 
-    // Check if command succeeded
     switch (result.term) {
         .Exited => |code| {
-            if (code != 0) {
-                return error.GSettingsFailed;
-            }
+            if (code != 0) return error.GSettingsFailed;
         },
         else => return error.GSettingsFailed,
     }
 
-    // If caller wants the output, copy it to their allocator
-    if (allocator) |alloc| {
-        return try alloc.dupe(u8, result.stdout);
-    } else {
-        // Caller doesn't need output (write operation)
-        return "";
-    }
+    return result.stdout;
 }
 
-// Apply a Night Light configuration to the system.
-//
-// This is the main function you'll use! It takes your configuration
-// and actually changes the GNOME settings to match it.
-//
-// Example:
-//   try apply_config(std.heap.page_allocator, types.default_warm);
-//
-// Does this make sense? We're taking the values from our config
-// structure and telling GNOME "please use these settings!"
-//
-// Note: allocator parameter is kept for API consistency, even though
-// we don't need it for write operations. This makes the function
-// signature consistent with read_config which does need allocation.
-pub fn apply_config(
-    allocator: std.mem.Allocator,
-    config: types.NightLightConfig,
-) !void {
-    _ = allocator; // Not used for write operations, but kept for consistency
-    // Enable or disable Night Light
-    try write_bool("night-light-enabled", config.enabled);
-
-    // Set the temperature (warmth level)
-    try write_u32("night-light-temperature", config.temperature);
-
-    // Set automatic schedule preference
-    try write_bool("night-light-schedule-automatic", config.schedule_automatic);
-
-    // If not automatic, set manual schedule times
-    if (!config.schedule_automatic) {
-        try write_f64("night-light-schedule-from", config.schedule_from);
-        try write_f64("night-light-schedule-to", config.schedule_to);
-    }
-}
-
-// Read current Night Light configuration from the system.
-//
-// This lets you check what the current settings are. Useful for
-// seeing what's already configured!
-pub fn read_config(allocator: std.mem.Allocator) !types.NightLightConfig {
-    return types.NightLightConfig{
-        .enabled = try read_bool(allocator, "night-light-enabled"),
-        .temperature = try read_u32(allocator, "night-light-temperature"),
-        .schedule_automatic = try read_bool(allocator, "night-light-schedule-automatic"),
-        .schedule_from = try read_f64(allocator, "night-light-schedule-from"),
-        .schedule_to = try read_f64(allocator, "night-light-schedule-to"),
+pub fn systemRunner() CommandRunner {
+    return CommandRunner{
+        .runFn = systemRun,
     };
 }
 
-// Apply a full display configuration (including color modes).
-//
-// This handles both Night Light settings and special color modes
-// like monochrome or red-green filters.
-pub fn apply_display_config(
+pub const Client = struct {
     allocator: std.mem.Allocator,
-    config: types.DisplayConfig,
-) !void {
-    // Always apply Night Light settings first
-    try apply_config(allocator, config.night_light);
+    runner: CommandRunner,
 
-    // Then apply color mode if needed
-    switch (config.mode) {
-        .normal => {
-            // Normal mode - no special color filtering needed
-            // Night Light temperature adjustment is already applied above
-        },
-        .monochrome => {
-            // Monochrome (grayscale) mode
-            // Note: This requires Wayland protocol support
-            // On GNOME Wayland, we can use wlr-gamma-control protocol
-            // For now, we document this and can expand later
-            // TODO: Implement monochrome via Wayland color management protocols
-            // Future: Use wlr-gamma-control or similar to set grayscale LUT
-            // allocator will be needed when we implement this feature
-        },
-        .red_green => {
-            // Red-green only mode (no blue channel)
-            // This is useful for colorblind accessibility or special display needs
-            // TODO: Implement red-green filter via Wayland color management protocols
-            // Future: Use wlr-gamma-control to zero blue channel, max red/green
-            // allocator will be needed when we implement this feature
-        },
+    pub fn init(allocator: std.mem.Allocator, runner: CommandRunner) Client {
+        return Client{
+            .allocator = allocator,
+            .runner = runner,
+        };
     }
+
+    fn run(self: *Client, args: []const []const u8) ![]u8 {
+        var buffer: [8][]const u8 = undefined;
+        const total = args.len + 1;
+        if (total > buffer.len) return error.ArgumentOverflow;
+        buffer[0] = "gsettings";
+        var i: usize = 0;
+        while (i < args.len) : (i += 1) {
+            buffer[i + 1] = args[i];
+        }
+        return try self.runner.run(self.allocator, buffer[0..total]);
+    }
+
+    fn runWrite(self: *Client, args: []const []const u8) !void {
+        const output = try self.run(args);
+        if (output.len != 0) {
+            self.allocator.free(output);
+        }
+    }
+
+    fn readBool(self: *Client, schema: []const u8, key: []const u8) !bool {
+        const output = try self.run(&[_][]const u8{ "get", schema, key });
+        defer self.allocator.free(output);
+
+        const trimmed = std.mem.trim(u8, output, &std.ascii.whitespace);
+        return std.mem.eql(u8, trimmed, "true");
+    }
+
+    fn readU32(self: *Client, schema: []const u8, key: []const u8) !u32 {
+        const output = try self.run(&[_][]const u8{ "get", schema, key });
+        defer self.allocator.free(output);
+
+        var trimmed = std.mem.trim(u8, output, &std.ascii.whitespace);
+        if (std.mem.indexOf(u8, trimmed, " ")) |idx| {
+            trimmed = trimmed[idx + 1 ..];
+            trimmed = std.mem.trim(u8, trimmed, &std.ascii.whitespace);
+        }
+        if (trimmed.len == 0) return error.InvalidFormat;
+        return try std.fmt.parseInt(u32, trimmed, 10);
+    }
+
+    fn readF64(self: *Client, schema: []const u8, key: []const u8) !f64 {
+        const output = try self.run(&[_][]const u8{ "get", schema, key });
+        defer self.allocator.free(output);
+
+        var trimmed = std.mem.trim(u8, output, &std.ascii.whitespace);
+        if (std.mem.indexOf(u8, trimmed, " ")) |idx| {
+            trimmed = trimmed[idx + 1 ..];
+            trimmed = std.mem.trim(u8, trimmed, &std.ascii.whitespace);
+        }
+        if (trimmed.len == 0) return error.InvalidFormat;
+        return try std.fmt.parseFloat(f64, trimmed);
+    }
+
+    fn writeBool(self: *Client, schema: []const u8, key: []const u8, value: bool) !void {
+        const val = if (value) "true" else "false";
+        try self.runWrite(&[_][]const u8{ "set", schema, key, val });
+    }
+
+    fn writeU32(self: *Client, schema: []const u8, key: []const u8, value: u32) !void {
+        const text = try std.fmt.allocPrint(self.allocator, "{}", .{value});
+        defer self.allocator.free(text);
+        try self.runWrite(&[_][]const u8{ "set", schema, key, text });
+    }
+
+    fn writeF64(self: *Client, schema: []const u8, key: []const u8, value: f64) !void {
+        const text = try std.fmt.allocPrint(self.allocator, "{d}", .{value});
+        defer self.allocator.free(text);
+        try self.runWrite(&[_][]const u8{ "set", schema, key, text });
+    }
+
+    pub fn readNightLight(self: *Client) !types.NightLightConfig {
+        return types.NightLightConfig{
+            .enabled = try self.readBool(COLOR_SCHEMA, "night-light-enabled"),
+            .temperature = try self.readU32(COLOR_SCHEMA, "night-light-temperature"),
+            .schedule_automatic = try self.readBool(COLOR_SCHEMA, "night-light-schedule-automatic"),
+            .schedule_from = try self.readF64(COLOR_SCHEMA, "night-light-schedule-from"),
+            .schedule_to = try self.readF64(COLOR_SCHEMA, "night-light-schedule-to"),
+        };
+    }
+
+    pub fn applyNightLight(self: *Client, config: types.NightLightConfig) !void {
+        try self.writeBool(COLOR_SCHEMA, "night-light-enabled", config.enabled);
+        try self.writeU32(COLOR_SCHEMA, "night-light-temperature", config.temperature);
+        try self.writeBool(COLOR_SCHEMA, "night-light-schedule-automatic", config.schedule_automatic);
+
+        if (!config.schedule_automatic) {
+            try self.writeF64(COLOR_SCHEMA, "night-light-schedule-from", config.schedule_from);
+            try self.writeF64(COLOR_SCHEMA, "night-light-schedule-to", config.schedule_to);
+        }
+    }
+
+    pub fn applyDisplay(self: *Client, config: types.DisplayConfig) !void {
+        try self.applyNightLight(config.night_light);
+
+        switch (config.mode) {
+            .normal => {},
+            .monochrome => {},
+            .red_green => {},
+        }
+    }
+
+    pub fn readInterface(self: *Client) !types.InterfaceConfig {
+        return types.InterfaceConfig{
+            .text_scale = try self.readF64(INTERFACE_SCHEMA, "text-scaling-factor"),
+        };
+    }
+
+    pub fn applyInterface(self: *Client, config: types.InterfaceConfig) !void {
+        try self.writeF64(INTERFACE_SCHEMA, "text-scaling-factor", config.text_scale);
+    }
+
+    pub fn readSystem(self: *Client) !types.SystemConfig {
+        return types.SystemConfig{
+            .display = types.DisplayConfig{
+                .night_light = try self.readNightLight(),
+            },
+            .interface = try self.readInterface(),
+        };
+    }
+
+    pub fn applySystem(self: *Client, config: types.SystemConfig) !void {
+        try self.applyDisplay(config.display);
+        try self.applyInterface(config.interface);
+    }
+};
+
+test "read night light config" {
+    const Step = struct {
+        expected: []const []const u8,
+        response: []const u8,
+    };
+    const steps = [_]Step{
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-enabled" }, .response = "true" },
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-temperature" }, .response = "uint32 3000" },
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-schedule-automatic" }, .response = "false" },
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-schedule-from" }, .response = "double 0.0" },
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-schedule-to" }, .response = "double 24.0" },
+    };
+    const MockState = struct {
+        steps: []const Step,
+        index: usize = 0,
+    };
+    var state = MockState{ .steps = &steps };
+
+    const Mock = struct {
+        var state_ptr: *MockState = undefined;
+
+        fn run(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
+            const Self = @This();
+            const st = Self.state_ptr;
+            if (st.index >= st.steps.len) return error.UnexpectedCommand;
+            const step = st.steps[st.index];
+            st.index += 1;
+            try std.testing.expectEqual(step.expected.len, args.len);
+            var i: usize = 0;
+            while (i < args.len) : (i += 1) {
+                try std.testing.expectEqualStrings(step.expected[i], args[i]);
+            }
+            return allocator.dupe(u8, step.response);
+        }
+    };
+    Mock.state_ptr = &state;
+
+    const runner = CommandRunner{ .runFn = Mock.run };
+
+    var client = Client.init(std.testing.allocator, runner);
+    const config = try client.readNightLight();
+    try std.testing.expect(config.enabled);
+    try std.testing.expectEqual(@as(u32, 3000), config.temperature);
+    try std.testing.expect(!config.schedule_automatic);
+    try std.testing.expectEqual(@as(f64, 0.0), config.schedule_from);
+    try std.testing.expectEqual(@as(f64, 24.0), config.schedule_to);
+    try std.testing.expectEqual(@as(usize, steps.len), state.index);
 }
 
+test "apply night light config writes commands" {
+    const Step = struct {
+        expected: []const []const u8,
+    };
+    const steps = [_]Step{
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-enabled", "true" } },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-temperature", "1700" } },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-schedule-automatic", "false" } },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-schedule-from", "0" } },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-schedule-to", "24" } },
+    };
+    const MockState = struct {
+        steps: []const Step,
+        index: usize = 0,
+    };
+    var state = MockState{ .steps = &steps };
+
+    const Mock = struct {
+        var state_ptr: *MockState = undefined;
+
+        fn run(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
+            const Self = @This();
+            const st = Self.state_ptr;
+            if (st.index >= st.steps.len) return error.UnexpectedCommand;
+            const step = st.steps[st.index];
+            st.index += 1;
+            try std.testing.expectEqual(step.expected.len, args.len);
+            var i: usize = 0;
+            while (i < args.len) : (i += 1) {
+                try std.testing.expectEqualStrings(step.expected[i], args[i]);
+            }
+            return allocator.dupe(u8, "");
+        }
+    };
+    Mock.state_ptr = &state;
+
+    const runner = CommandRunner{ .runFn = Mock.run };
+
+    var client = Client.init(std.testing.allocator, runner);
+    const config = types.NightLightConfig{
+        .enabled = true,
+        .temperature = 1700,
+        .schedule_automatic = false,
+        .schedule_from = 0.0,
+        .schedule_to = 24.0,
+    };
+    try client.applyNightLight(config);
+    try std.testing.expectEqual(@as(usize, steps.len), state.index);
+}
+
+test "interface scaling round-trip" {
+    const Step = struct {
+        expected: []const []const u8,
+        response: []const u8,
+    };
+    const steps = [_]Step{
+        .{ .expected = &[_][]const u8{ "gsettings", "get", INTERFACE_SCHEMA, "text-scaling-factor" }, .response = "double 1.0" },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", INTERFACE_SCHEMA, "text-scaling-factor", "1.75" }, .response = "" },
+    };
+    const MockState = struct {
+        steps: []const Step,
+        index: usize = 0,
+    };
+    var state = MockState{ .steps = &steps };
+
+    const Mock = struct {
+        var state_ptr: *MockState = undefined;
+
+        fn run(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
+            const Self = @This();
+            const st = Self.state_ptr;
+            if (st.index >= st.steps.len) return error.UnexpectedCommand;
+            const step = st.steps[st.index];
+            st.index += 1;
+            try std.testing.expectEqual(step.expected.len, args.len);
+            var i: usize = 0;
+            while (i < args.len) : (i += 1) {
+                try std.testing.expectEqualStrings(step.expected[i], args[i]);
+            }
+            return allocator.dupe(u8, step.response);
+        }
+    };
+    Mock.state_ptr = &state;
+
+    const runner = CommandRunner{ .runFn = Mock.run };
+
+    var client = Client.init(std.testing.allocator, runner);
+    const current = try client.readInterface();
+    try std.testing.expectEqual(@as(f64, 1.0), current.text_scale);
+    try client.applyInterface(.{ .text_scale = 1.75 });
+    try std.testing.expectEqual(@as(usize, steps.len), state.index);
+}
+
+test "apply system config writes display and interface commands" {
+    const Step = struct {
+        expected: []const []const u8,
+    };
+    const steps = [_]Step{
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-enabled", "true" } },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-temperature", "1700" } },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-schedule-automatic", "false" } },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-schedule-from", "0" } },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", COLOR_SCHEMA, "night-light-schedule-to", "24" } },
+        .{ .expected = &[_][]const u8{ "gsettings", "set", INTERFACE_SCHEMA, "text-scaling-factor", "1.75" } },
+    };
+    const MockState = struct {
+        steps: []const Step,
+        index: usize = 0,
+    };
+    var state = MockState{ .steps = &steps };
+
+    const Mock = struct {
+        var state_ptr: *MockState = undefined;
+
+        fn run(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
+            const Self = @This();
+            const st = Self.state_ptr;
+            if (st.index >= st.steps.len) return error.UnexpectedCommand;
+            const step = st.steps[st.index];
+            st.index += 1;
+            try std.testing.expectEqual(step.expected.len, args.len);
+            var i: usize = 0;
+            while (i < args.len) : (i += 1) {
+                try std.testing.expectEqualStrings(step.expected[i], args[i]);
+            }
+            return allocator.dupe(u8, "");
+        }
+    };
+    Mock.state_ptr = &state;
+
+    const runner = CommandRunner{ .runFn = Mock.run };
+
+    var client = Client.init(std.testing.allocator, runner);
+    const system = types.SystemConfig{
+        .display = .{
+            .night_light = .{
+                .enabled = true,
+                .temperature = 1700,
+                .schedule_automatic = false,
+                .schedule_from = 0.0,
+                .schedule_to = 24.0,
+            },
+        },
+        .interface = .{ .text_scale = 1.75 },
+    };
+    try client.applySystem(system);
+    try std.testing.expectEqual(@as(usize, steps.len), state.index);
+}
+
+test "read system config combines night light and interface" {
+    const Step = struct {
+        expected: []const []const u8,
+        response: []const u8,
+    };
+    const steps = [_]Step{
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-enabled" }, .response = "true" },
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-temperature" }, .response = "uint32 2800" },
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-schedule-automatic" }, .response = "true" },
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-schedule-from" }, .response = "double 18.0" },
+        .{ .expected = &[_][]const u8{ "gsettings", "get", COLOR_SCHEMA, "night-light-schedule-to" }, .response = "double 7.0" },
+        .{ .expected = &[_][]const u8{ "gsettings", "get", INTERFACE_SCHEMA, "text-scaling-factor" }, .response = "double 1.25" },
+    };
+    const MockState = struct {
+        steps: []const Step,
+        index: usize = 0,
+    };
+    var state = MockState{ .steps = &steps };
+
+    const Mock = struct {
+        var state_ptr: *MockState = undefined;
+
+        fn run(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
+            const Self = @This();
+            const st = Self.state_ptr;
+            if (st.index >= st.steps.len) return error.UnexpectedCommand;
+            const step = st.steps[st.index];
+            st.index += 1;
+            try std.testing.expectEqual(step.expected.len, args.len);
+            var i: usize = 0;
+            while (i < args.len) : (i += 1) {
+                try std.testing.expectEqualStrings(step.expected[i], args[i]);
+            }
+            return allocator.dupe(u8, step.response);
+        }
+    };
+    Mock.state_ptr = &state;
+
+    const runner = CommandRunner{ .runFn = Mock.run };
+
+    var client = Client.init(std.testing.allocator, runner);
+    const system = try client.readSystem();
+    try std.testing.expect(system.display.night_light.enabled);
+    try std.testing.expectEqual(@as(u32, 2800), system.display.night_light.temperature);
+    try std.testing.expect(system.display.night_light.schedule_automatic);
+    try std.testing.expectEqual(@as(f64, 18.0), system.display.night_light.schedule_from);
+    try std.testing.expectEqual(@as(f64, 7.0), system.display.night_light.schedule_to);
+    try std.testing.expectEqual(@as(f64, 1.25), system.interface.text_scale);
+    try std.testing.expectEqual(@as(usize, steps.len), state.index);
+}
+
+test "interface scaling randomized sequences" {
+    const RecordingState = struct {
+        buffer: std.ArrayList([]const u8),
+    };
+
+    var state = RecordingState{ .buffer = std.ArrayList([]const u8).init(std.testing.allocator) };
+    defer {
+        for (state.buffer.items) |item| {
+            std.testing.allocator.free(item);
+        }
+        state.buffer.deinit();
+    }
+
+    const Mock = struct {
+        var state_ptr: *RecordingState = undefined;
+
+        fn run(allocator: std.mem.Allocator, args: []const []const u8) ![]u8 {
+            const Self = @This();
+            const st = Self.state_ptr;
+            for (st.buffer.items) |item| {
+                allocator.free(item);
+            }
+            st.buffer.clearRetainingCapacity();
+
+            var i: usize = 0;
+            while (i < args.len) : (i += 1) {
+                const copy = try allocator.dupe(u8, args[i]);
+                try st.buffer.append(copy);
+            }
+            return allocator.dupe(u8, "");
+        }
+    };
+    Mock.state_ptr = &state;
+
+    const runner = CommandRunner{ .runFn = Mock.run };
+
+    var client = Client.init(std.testing.allocator, runner);
+    var prng = std.rand.DefaultPrng.init(0x1234abcd);
+    const random = prng.random();
+
+    var i: usize = 0;
+    while (i < 16) : (i += 1) {
+        const scale = 0.75 + random.float(f64) * 1.50; // range 0.75 - 2.25
+        try client.applyInterface(.{ .text_scale = scale });
+        try std.testing.expectEqual(@as(usize, 5), state.buffer.items.len);
+        try std.testing.expectEqualStrings("gsettings", state.buffer.items[0]);
+        try std.testing.expectEqualStrings("set", state.buffer.items[1]);
+        try std.testing.expectEqualStrings(INTERFACE_SCHEMA, state.buffer.items[2]);
+        try std.testing.expectEqualStrings("text-scaling-factor", state.buffer.items[3]);
+
+        const value_str = state.buffer.items[4];
+        const parsed = try std.fmt.parseFloat(f64, value_str);
+        try std.testing.expectApproxEqAbs(scale, parsed, 1e-9);
+    }
+}

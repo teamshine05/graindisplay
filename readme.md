@@ -8,7 +8,8 @@ graindisplay helps you set up a comfortable, warm display that's
 easy on your eyes, especially at night. Your display emits blue
 light, which can interfere with your body's natural sleep cycle.
 By making the display warmer (more orange/red, less blue), we
-reduce eye strain and help you wind down naturally.
+reduce eye strain and help you wind down naturally. you can also
+scale up GNOME's system text (Wayland) to 1.75x for easier reading.
 
 This library works with GNOME's Night Light feature on Ubuntu
 24.04 LTS Wayland. It gives you both interactive and non-interactive
@@ -27,10 +28,16 @@ pub fn main() !void {
     
     // Apply a preset warm configuration
     try graindisplay.apply_config(allocator, graindisplay.very_warm);
+
+    // Increase GNOME Wayland text scaling to 1.75x
+    try graindisplay.apply_interface_config(allocator, graindisplay.text_scale_very_large);
     
     // Or read current settings
     const current = try graindisplay.read_config(allocator);
     std.debug.print("Current temperature: {}K\n", .{current.temperature});
+
+    const ui = try graindisplay.read_interface(allocator);
+    std.debug.print("Current text scale: {d:.2}x\n", .{ui.text_scale});
 }
 ```
 
@@ -105,6 +112,23 @@ zig build run -- --mode normal
 
 **Note:** Monochrome and red-green modes require Wayland protocol support (currently documented for future implementation).
 
+### set text scaling (Wayland GNOME)
+
+```bash
+# Set explicit scale (e.g. 1.75x larger text)
+zig build run -- --font-scale 1.75
+
+# Shortcut for 1.75x scaling
+zig build run -- --font-scale-175
+
+# Combine with presets / temperature changes
+zig build run -- --preset very-warm --font-scale-175
+```
+
+Text scaling maps to GNOME's `org.gnome.desktop.interface text-scaling-factor`.
+Values greater than `1.0` increase the apparent font size; `1.75` gives 75%
+larger text across Wayland sessions.
+
 ## color temperature guide
 
 Temperature is measured in Kelvins (K). Think of it like this:
@@ -175,6 +199,7 @@ to configure your display warmth.
 - ✅ All presets activate immediately (24/7) - no waiting for sunset!
 - ✅ Works with GNOME Wayland's built-in Night Light system
 - ✅ Uses proper GNOME settings daemon (`org.gnome.settings-daemon.plugins.color`)
+- ✅ Controls GNOME Wayland text scaling (default 1.0 → 1.75x and beyond)
 - ✅ Simple, decomplected Zig code that's easy to understand and modify
 
 **The key settings we control:**
@@ -182,6 +207,7 @@ to configure your display warmth.
 - `night-light-temperature` - how warm the colors get (in Kelvins)
 - `night-light-schedule-automatic` - use sunset/sunrise timing (disabled in all presets for 24/7 activation)
 - `night-light-schedule-from` / `night-light-schedule-to` - manual timing (set to 0.0-24.0 for always-on)
+- `text-scaling-factor` - GNOME Wayland text scaling multiplier (1.0 default, 1.75 recommended for easier reading)
 
 ## building
 
@@ -195,6 +221,12 @@ zig build
 # run the CLI
 zig build run -- --help
 ```
+
+## testing
+
+See `docs/tests.md` for an overview of our unit, integration, and randomized
+tests. The suite relies on mocked `gsettings` runners, so it can be run safely on
+any machine.
 
 ## file structure
 
@@ -235,6 +267,14 @@ can make a real difference in how you feel!
 the illuminators who teach time, wisdom, and tradition. leo's
 solar radiance meets the hierophant's patient teaching. we make
 comfort visible, understandable, and beautiful.
+
+## contributing
+
+questions, bug reports, or ideas? reach out:
+- instagram: `@risc.love`
+- discord: `@kae3g`
+
+we love hearing from people using graindisplay in their nightly workflows.
 
 ## license
 

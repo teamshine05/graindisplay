@@ -1,0 +1,35 @@
+name: Sync Unstable Branch
+
+on:
+  push:
+    branches:
+      - unstable
+
+jobs:
+  sync-branches:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync to main
+        run: |
+          git checkout main
+          git reset --hard unstable
+          git push origin main --force
+
+      - name: Sync to graintime-unstable
+        run: |
+          git checkout 12025-11-07--1529--pst--moon-mrigashirsha--asc-arie11--sun-08h
+          git reset --hard unstable
+          git push origin 12025-11-07--1529--pst--moon-mrigashirsha--asc-arie11--sun-08h --force

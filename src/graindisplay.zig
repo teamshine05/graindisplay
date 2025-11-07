@@ -14,23 +14,18 @@
 
 const std = @import("std");
 
-// Re-export our modules for external use.
-//
-// Why re-export? This pattern creates a clean public API.
-// Users import "graindisplay" and get everything they need,
-// but internally we keep concerns separated into modules.
 pub const types = @import("types.zig");
 pub const gsettings = @import("gsettings.zig");
 
-// Re-export commonly used types for convenience.
-pub const NightLightConfig = types.NightLightConfig;
-pub const apply_config = gsettings.apply_config;
-pub const read_config = gsettings.read_config;
+pub const CommandRunner = gsettings.CommandRunner;
+pub const Client = gsettings.Client;
 
-// Re-export preset configurations.
-//
-// These are ready-to-use configurations that you can apply
-// directly. Each one has a different level of warmth!
+pub const NightLightConfig = types.NightLightConfig;
+pub const DisplayConfig = types.DisplayConfig;
+pub const DisplayMode = types.DisplayMode;
+pub const InterfaceConfig = types.InterfaceConfig;
+pub const SystemConfig = types.SystemConfig;
+
 pub const default_warm = types.default_warm;
 pub const very_warm = types.very_warm;
 pub const moderate_warm = types.moderate_warm;
@@ -38,8 +33,66 @@ pub const warmer = types.warmer;
 pub const most_warm = types.most_warm;
 pub const daylight_movie = types.daylight_movie;
 
-// Re-export display configuration types.
-pub const DisplayConfig = types.DisplayConfig;
-pub const DisplayMode = types.DisplayMode;
-pub const apply_display_config = gsettings.apply_display_config;
+pub const text_scale_default = types.default_interface;
+pub const text_scale_large = types.text_scale_large;
+pub const text_scale_extra_large = types.text_scale_extra_large;
+pub const text_scale_very_large = types.text_scale_very_large;
+pub const text_scale_max = types.text_scale_max;
 
+pub fn systemRunner() CommandRunner {
+    return gsettings.systemRunner();
+}
+
+pub fn open(allocator: std.mem.Allocator) Client {
+    return gsettings.Client.init(allocator, systemRunner());
+}
+
+pub fn read_night_light(allocator: std.mem.Allocator) !NightLightConfig {
+    var client = open(allocator);
+    return client.readNightLight();
+}
+
+pub fn read_config(allocator: std.mem.Allocator) !NightLightConfig {
+    return read_night_light(allocator);
+}
+
+pub fn apply_config(allocator: std.mem.Allocator, config: NightLightConfig) !void {
+    var client = open(allocator);
+    try client.applyNightLight(config);
+}
+
+pub fn apply_display_config(allocator: std.mem.Allocator, config: DisplayConfig) !void {
+    var client = open(allocator);
+    try client.applyDisplay(config);
+}
+
+pub fn read_display(allocator: std.mem.Allocator) !DisplayConfig {
+    var client = open(allocator);
+    return types.DisplayConfig{
+        .night_light = try client.readNightLight(),
+    };
+}
+
+pub fn read_interface(allocator: std.mem.Allocator) !InterfaceConfig {
+    var client = open(allocator);
+    return try client.readInterface();
+}
+
+pub fn apply_interface_config(allocator: std.mem.Allocator, config: InterfaceConfig) !void {
+    var client = open(allocator);
+    try client.applyInterface(config);
+}
+
+pub fn apply_interface(allocator: std.mem.Allocator, config: InterfaceConfig) !void {
+    try apply_interface_config(allocator, config);
+}
+
+pub fn read_system(allocator: std.mem.Allocator) !SystemConfig {
+    var client = open(allocator);
+    return try client.readSystem();
+}
+
+pub fn apply_system_config(allocator: std.mem.Allocator, config: SystemConfig) !void {
+    var client = open(allocator);
+    try client.applySystem(config);
+}
