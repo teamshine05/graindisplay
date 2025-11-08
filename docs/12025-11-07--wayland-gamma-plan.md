@@ -26,3 +26,9 @@ implement real colour effects (monochrome, red-green, combinations) by talking d
 - implement monochrome LUT, integrate with `applyDisplay`.
 - add red/green LUT and intensity controls.
 - update docs/tests and share manual verification notes.
+
+## 2025-11-08 progress
+- Added zig-wayland dependency (via `build.zig.zon`) so we can generate Wayland bindings at build time.
+- Build script runs `Scanner.create`, adds `wlr-gamma-control-unstable-v1.xml`, and links `wayland-client` for the CLI.
+- `src/wayland/effects.zig` now connects to Wayland, discovers `zwlr_gamma_control_manager_v1`, and keeps the connection around. `apply/reset` still return `error.Unimplemented`; LUT upload remains next step.
+- TODO next: enumerate outputs, create gamma controls per output, and stream generated LUT data when effects change.

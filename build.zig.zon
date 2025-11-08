@@ -1,0 +1,22 @@
+.{
+    .name = .graindisplay,
+    .version = "0.1.0",
+    .fingerprint = 0x1b68ef3f7383ed70,
+    .dependencies = .{
+        .wayland = .{
+            .url = "https://codeberg.org/ifreund/zig-wayland/archive/main.tar.gz",
+            .hash = "12203fa3b621b6fc095b70ef370858908b07d78b5649bd3c2491d4c1053efcddba1e",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "src",
+        "docs",
+        "readme.md",
+        "license",
+        "license-apache",
+        "license-mit",
+        "license-cc-by-4.0",
+        "config",
+    },
+}

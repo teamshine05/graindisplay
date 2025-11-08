@@ -214,6 +214,11 @@ to configure your display warmth.
 
 ## building
 
+Install prerequisites (Ubuntu example):
+```bash
+sudo apt install pkg-config wayland-protocols libwayland-dev libgtk-3-dev libfreetype6-dev libfontconfig1-dev
+```
+
 ```bash
 # run tests
 zig build test
