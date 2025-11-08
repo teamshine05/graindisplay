@@ -22,15 +22,16 @@ pub const Client = gsettings.Client;
 
 pub const NightLightConfig = types.NightLightConfig;
 pub const DisplayConfig = types.DisplayConfig;
-pub const DisplayMode = types.DisplayMode;
+pub const DisplayEffect = types.DisplayEffect;
+pub const DisplayEffects = types.DisplayEffects;
 pub const InterfaceConfig = types.InterfaceConfig;
 pub const SystemConfig = types.SystemConfig;
 
 pub const default_warm = types.default_warm;
-pub const very_warm = types.very_warm;
+pub const extra_warm = types.extra_warm;
 pub const moderate_warm = types.moderate_warm;
 pub const warmer = types.warmer;
-pub const most_warm = types.most_warm;
+pub const very_warm = types.very_warm;
 pub const daylight_movie = types.daylight_movie;
 
 pub const text_scale_default = types.default_interface;

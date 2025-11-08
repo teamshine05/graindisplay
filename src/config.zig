@@ -5,15 +5,16 @@ pub const Preference = struct {
     preset: ?Preset = null,
     temperature: ?u32 = null,
     enable: ?bool = null,
-    mode: ?types.DisplayMode = null,
+    effects: ?types.DisplayEffects = null,
+    clear_effects: bool = false,
     font_scale: ?f64 = null,
 
     pub const Preset = enum {
         default_warm,
-        very_warm,
+        extra_warm,
         moderate_warm,
         warmer,
-        most_warm,
+        very_warm,
         daylight_movie,
     };
 };
@@ -66,7 +67,26 @@ fn parseBuffer(buffer: []const u8) !?Preference {
         } else if (std.mem.eql(u8, key, "enable")) {
             prefs.enable = parseBool(value) orelse continue;
         } else if (std.mem.eql(u8, key, "mode")) {
-            prefs.mode = parseMode(value) orelse continue;
+            if (std.ascii.eqlIgnoreCase(value, "normal") or std.ascii.eqlIgnoreCase(value, "none")) {
+                prefs.clear_effects = true;
+            } else {
+                var effects = prefs.effects orelse types.DisplayEffects{};
+                var it_modes = std.mem.tokenizeAny(u8, value, ", ");
+                var any = false;
+                while (it_modes.next()) |token| {
+                    const trimmed_token = trim(token);
+                    if (trimmed_token.len == 0) continue;
+                    if (std.ascii.eqlIgnoreCase(trimmed_token, "normal") or std.ascii.eqlIgnoreCase(trimmed_token, "none")) {
+                        prefs.clear_effects = true;
+                        continue;
+                    }
+                    if (parseEffect(trimmed_token)) |effect| {
+                        effects.enable(effect);
+                        any = true;
+                    }
+                }
+                if (any) prefs.effects = effects;
+            }
         } else if (std.mem.eql(u8, key, "font_scale")) {
             prefs.font_scale = std.fmt.parseFloat(f64, value) catch continue;
         } else {
@@ -90,16 +110,15 @@ fn parseBool(value: []const u8) ?bool {
 
 fn parsePreset(value: []const u8) ?Preference.Preset {
     if (std.mem.eql(u8, value, "default-warm")) return .default_warm;
-    if (std.mem.eql(u8, value, "very-warm")) return .very_warm;
+    if (std.mem.eql(u8, value, "extra-warm")) return .extra_warm;
     if (std.mem.eql(u8, value, "moderate-warm")) return .moderate_warm;
     if (std.mem.eql(u8, value, "warmer")) return .warmer;
-    if (std.mem.eql(u8, value, "most-warm")) return .most_warm;
+    if (std.mem.eql(u8, value, "very-warm")) return .very_warm;
     if (std.mem.eql(u8, value, "daylight-movie")) return .daylight_movie;
     return null;
 }
 
-fn parseMode(value: []const u8) ?types.DisplayMode {
-    if (std.mem.eql(u8, value, "normal")) return .normal;
+fn parseEffect(value: []const u8) ?types.DisplayEffect {
     if (std.mem.eql(u8, value, "monochrome")) return .monochrome;
     if (std.mem.eql(u8, value, "red-green")) return .red_green;
     return null;
@@ -112,18 +131,22 @@ pub fn parseFromBytes(buffer: []const u8) !Preference {
 test "parse config buffer" {
     const config_text =
         \\# comment
-        \\preset = most-warm
+        \\preset = very-warm
         \\font_scale = 1.75
         \\enable = false
-        \\mode = monochrome
+        \\mode = monochrome, red-green
         \\temperature = 3200
     ;
 
     const prefs = try parseFromBytes(config_text);
-    try std.testing.expectEqual(@as(?Preference.Preset, .most_warm), prefs.preset);
+    try std.testing.expectEqual(@as(?Preference.Preset, .very_warm), prefs.preset);
     try std.testing.expectEqual(@as(?f64, 1.75), prefs.font_scale);
     try std.testing.expectEqual(@as(?bool, false), prefs.enable);
-    try std.testing.expectEqual(@as(?types.DisplayMode, .monochrome), prefs.mode);
+    try std.testing.expect(prefs.effects != null);
+    if (prefs.effects) |effects| {
+        try std.testing.expect(effects.monochrome);
+        try std.testing.expect(effects.red_green);
+    }
     try std.testing.expectEqual(@as(?u32, 3200), prefs.temperature);
 }
 
@@ -131,9 +154,10 @@ test "parse ignores unknown lines" {
     const config_text =
         \\unknown = value
         \\font_scale = 1.25
+        \\mode = none
     ;
 
     const prefs = try parseFromBytes(config_text);
     try std.testing.expectEqual(@as(?f64, 1.25), prefs.font_scale);
-    try std.testing.expect(null == prefs.preset);
+    try std.testing.expect(prefs.clear_effects);
 }

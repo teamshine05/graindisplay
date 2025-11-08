@@ -22,7 +22,8 @@ const Options = struct {
     enable: ?bool = null, // --enable or --disable
     temperature: ?u32 = null, // -t or --temperature
     preset: ?[]const u8 = null, // -p or --preset
-    mode: ?graindisplay.DisplayMode = null, // -m or --mode (normal, monochrome, red-green)
+    mode_clear: bool = false,
+    effects: graindisplay.DisplayEffects = .{},
     font_scale: ?f64 = null, // --font-scale or --font-scale-175
 };
 
@@ -69,12 +70,10 @@ fn parse_args_list(
                 return null;
             }
             const mode_str = list[i];
-            if (std.mem.eql(u8, mode_str, "normal")) {
-                opts.mode = .normal;
-            } else if (std.mem.eql(u8, mode_str, "monochrome")) {
-                opts.mode = .monochrome;
-            } else if (std.mem.eql(u8, mode_str, "red-green")) {
-                opts.mode = .red_green;
+            if (std.mem.eql(u8, mode_str, "normal") or std.mem.eql(u8, mode_str, "none")) {
+                opts.mode_clear = true;
+            } else if (effectFromString(mode_str)) |effect| {
+                opts.effects.enable(effect);
             } else {
                 std.debug.print("Error: unknown mode '{s}'\n", .{mode_str});
                 std.debug.print("Available modes: normal, monochrome, red-green\n", .{});
@@ -135,16 +134,16 @@ fn print_usage() !void {
         \\
         \\Presets:
         \\  default-warm     Balanced warmth (3000K)
-        \\  very-warm        Extra warm (2500K)
+        \\  extra-warm       Extra warm (2500K)
         \\  warmer           Warm reading lamp (2800K)
-        \\  most-warm        Warmest possible (1700K)
+        \\  very-warm        Warmest possible (1700K)
         \\  moderate-warm    Gentle warmth (4000K)
         \\  daylight-movie   Subtle warmth for movies (4500K)
         \\
         \\Examples:
         \\  graindisplay --interactive
         \\  graindisplay -f
-        \\  graindisplay --preset most-warm
+        \\  graindisplay --preset very-warm
         \\  graindisplay --preset daylight-movie
         \\  graindisplay --mode monochrome
         \\  graindisplay --mode red-green
@@ -329,7 +328,7 @@ pub fn main() !void {
             display_config.night_light = resolved;
         } else {
             std.debug.print("Unknown preset: {s}\n", .{preset});
-            std.debug.print("Available presets: default-warm, very-warm, warmer, most-warm, moderate-warm, daylight-movie\n", .{});
+            std.debug.print("Available presets: default-warm, extra-warm, warmer, very-warm, moderate-warm, daylight-movie\n", .{});
             return;
         }
     }
@@ -341,8 +340,16 @@ pub fn main() !void {
     if (opts.temperature) |temp| {
         display_config.night_light.temperature = temp;
     }
-    if (opts.mode) |mode| {
-        display_config.mode = mode;
+    if (opts.mode_clear) {
+        display_config.effects.clear();
+    }
+
+    if (!display_config.effects.isNormal()) {
+        if (opts.mode_clear) {
+            display_config.effects.clear();
+        }
+        if (opts.effects.monochrome) display_config.effects.monochrome = true;
+        if (opts.effects.red_green) display_config.effects.red_green = true;
     }
     if (opts.font_scale) |scale| {
         if (scale <= 0) {
@@ -361,18 +368,24 @@ pub fn main() !void {
     if (opts.font_scale != null) {
         try writeStr(stdout_fd, "Text scaling updated.\n");
     }
-    if (display_config.mode != .normal) {
+    if (!display_config.effects.isNormal()) {
         try writeStr(stdout_fd, "Note: Special color modes (monochrome/red-green) may require additional Wayland protocol support.\n");
     }
 }
 
 fn presetByName(name: []const u8) ?graindisplay.NightLightConfig {
     if (std.mem.eql(u8, name, "default-warm")) return graindisplay.default_warm;
-    if (std.mem.eql(u8, name, "very-warm")) return graindisplay.very_warm;
+    if (std.mem.eql(u8, name, "extra-warm")) return graindisplay.extra_warm;
     if (std.mem.eql(u8, name, "moderate-warm")) return graindisplay.moderate_warm;
     if (std.mem.eql(u8, name, "warmer")) return graindisplay.warmer;
-    if (std.mem.eql(u8, name, "most-warm")) return graindisplay.most_warm;
+    if (std.mem.eql(u8, name, "very-warm")) return graindisplay.very_warm;
     if (std.mem.eql(u8, name, "daylight-movie")) return graindisplay.daylight_movie;
+    return null;
+}
+
+fn effectFromString(value: []const u8) ?graindisplay.DisplayEffect {
+    if (std.mem.eql(u8, value, "monochrome")) return .monochrome;
+    if (std.mem.eql(u8, value, "red-green")) return .red_green;
     return null;
 }
 
@@ -384,10 +397,10 @@ fn applyPreferences(
     if (preferences.preset) |preset| {
         const resolved = switch (preset) {
             .default_warm => graindisplay.default_warm,
-            .very_warm => graindisplay.very_warm,
+            .extra_warm => graindisplay.extra_warm,
             .moderate_warm => graindisplay.moderate_warm,
             .warmer => graindisplay.warmer,
-            .most_warm => graindisplay.most_warm,
+            .very_warm => graindisplay.very_warm,
             .daylight_movie => graindisplay.daylight_movie,
         };
         display_config.night_light = resolved;
@@ -401,8 +414,12 @@ fn applyPreferences(
         display_config.night_light.enabled = value;
     }
 
-    if (preferences.mode) |mode| {
-        display_config.mode = mode;
+    if (preferences.clear_effects) {
+        display_config.effects.clear();
+    }
+
+    if (preferences.effects) |effects| {
+        display_config.effects = effects;
     }
 
     if (preferences.font_scale) |scale| {
@@ -419,15 +436,23 @@ test "parse args list handles font scale" {
 }
 
 test "parse args list handles presets and shortcuts" {
-    const args = [_][]const u8{ "graindisplay", "--preset", "most-warm", "--font-scale-175" };
+    const args = [_][]const u8{ "graindisplay", "--preset", "very-warm", "--font-scale-175" };
     const opts = try parse_args_list(std.testing.allocator, &args);
     try std.testing.expect(opts.preset != null);
-    try std.testing.expectEqualStrings("most-warm", opts.preset.?);
+    try std.testing.expectEqualStrings("very-warm", opts.preset.?);
     try std.testing.expect(opts.font_scale != null);
     try std.testing.expectEqual(@as(f64, 1.75), opts.font_scale.?);
 }
 
 test "preset lookup by name" {
-    try std.testing.expect(presetByName("most-warm") != null);
+    try std.testing.expect(presetByName("very-warm") != null);
     try std.testing.expect(presetByName("unknown") == null);
+}
+
+test "parse args list handles layered modes" {
+    const args = [_][]const u8{ "graindisplay", "--mode", "monochrome", "--mode", "red-green" };
+    const opts = try parse_args_list(std.testing.allocator, &args);
+    try std.testing.expect(opts.effects.monochrome);
+    try std.testing.expect(opts.effects.red_green);
+    try std.testing.expect(!opts.mode_clear);
 }

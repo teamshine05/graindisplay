@@ -156,10 +156,12 @@ pub const Client = struct {
     pub fn applyDisplay(self: *Client, config: types.DisplayConfig) !void {
         try self.applyNightLight(config.night_light);
 
-        switch (config.mode) {
-            .normal => {},
-            .monochrome => {},
-            .red_green => {},
+        if (config.effects.monochrome) {
+            // TODO: Implement monochrome via Wayland color management protocols
+            // e.g., gamma LUT adjustments.
+        }
+        if (config.effects.red_green) {
+            // TODO: Implement red-green filter via Wayland color management protocols.
         }
     }
 

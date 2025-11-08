@@ -67,17 +67,17 @@ Shows all current Night Light settings in a readable format.
 ### apply a preset
 
 ```bash
-zig build run -- --preset most-warm
+zig build run -- --preset very-warm
 # or short form:
-zig build run -- -p most-warm
+zig build run -- -p very-warm
 ```
 
 **Available presets** (all activate immediately - 24/7):
 
 - `default-warm` - balanced warmth (3000K)
-- `very-warm` - extra warm, like candlelight (2500K)
+- `extra-warm` - extra warm, like candlelight (2500K)
 - `warmer` - warm reading lamp (2800K)
-- `most-warm` - warmest possible, like sitting by a fireplace (1700K)
+- `very-warm` - warmest possible, like sitting by a fireplace (1700K)
 - `moderate-warm` - gentle warmth (4000K)
 - `daylight-movie` - subtle warmth for movies during the day (4500K)
 
@@ -106,11 +106,14 @@ zig build run -- --mode monochrome
 # Red-green only mode (no blue channel)
 zig build run -- --mode red-green
 
-# Normal color mode (default)
+# Stack modes (monochrome + red-green)
+zig build run -- --mode monochrome --mode red-green
+
+# Normal color mode (clears stacked modes)
 zig build run -- --mode normal
 ```
 
-**Note:** Monochrome and red-green modes require Wayland protocol support (currently documented for future implementation).
+You can pass `--mode` multiple times to combine effects. Use `--mode normal` (or `--mode none`) to clear all effects before applying new ones. The config file accepts comma-separated values, e.g. `mode = monochrome, red-green`.
 
 ### set text scaling (Wayland GNOME)
 
@@ -154,11 +157,11 @@ zig build run -- --enable
 zig build run -- --disable
 
 # Apply warm presets (all work 24/7!)
-zig build run -- --preset most-warm      # Warmest (1700K)
-zig build run -- --preset very-warm      # Extra warm (2500K)
-zig build run -- --preset warmer         # Reading lamp (2800K)
-zig build run -- --preset default-warm   # Balanced (3000K)
-zig build run -- --preset moderate-warm   # Gentle (4000K)
+zig build run -- --preset very-warm     # Warmest (1700K)
+zig build run -- --preset extra-warm    # Extra warm (2500K)
+zig build run -- --preset warmer        # Reading lamp (2800K)
+zig build run -- --preset default-warm  # Balanced (3000K)
+zig build run -- --preset moderate-warm # Gentle (4000K)
 zig build run -- --preset daylight-movie # Subtle for movies (4500K)
 
 # Set custom temperature
@@ -170,7 +173,7 @@ zig build run -- --mode red-green        # Red/green only
 zig build run -- --mode normal           # Standard color
 
 # Combine presets and modes
-zig build run -- --preset most-warm --mode monochrome
+zig build run -- --preset very-warm --mode red-green --mode monochrome
 
 # Interactive mode
 zig build run -- --interactive
@@ -234,11 +237,11 @@ cp config/graindisplay.example.cfg ~/.config/graindisplay/config.cfg
 ```
 
 Supported keys:
-- `preset` – one of `default-warm`, `very-warm`, `warmer`, `most-warm`,
+- `preset` – one of `default-warm`, `extra-warm`, `warmer`, `very-warm`,
   `moderate-warm`, `daylight-movie`
 - `temperature` – Kelvin override (integer)
 - `enable` – `true` or `false`
-- `mode` – `normal`, `monochrome`, or `red-green`
+- `mode` – `normal`, `monochrome`, or `red-green`; comma-separated for multiple effects
 - `font_scale` – Wayland scaling factor such as `1.75`
 
 Command-line flags always override config values. With the build script forwarding

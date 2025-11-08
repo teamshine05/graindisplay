@@ -63,12 +63,11 @@ pub const default_warm: NightLightConfig = .{
     .schedule_to = 24.0,
 };
 
-// Warmer configuration (more orange).
+// Extra warm configuration (more orange).
 //
-// Use this if you want an extra warm display, especially late at night.
-//
+// Previously named "very warm" (2500K).
 // Note: Set to 24/7 so it's active immediately when applied.
-pub const very_warm: NightLightConfig = .{
+pub const extra_warm: NightLightConfig = .{
     .enabled = true,
     .temperature = 2500, // Very warm, like candlelight
     .schedule_automatic = false, // Always active when applied
@@ -102,15 +101,14 @@ pub const warmer: NightLightConfig = .{
     .schedule_to = 24.0,
 };
 
-// Most warm configuration (warmest possible).
+// Very warm configuration (warmest possible).
 //
 // Maximum warmth - like sitting by a fireplace. Use for late night
 // when you want the absolute minimum blue light exposure.
 //
+// Previously called "most warm" (1700K).
 // Note: We disable automatic schedule so it's active immediately when applied.
-// This allows you to test and use it during the day if needed.
-// You can re-enable automatic schedule later if you prefer time-based activation.
-pub const most_warm: NightLightConfig = .{
+pub const very_warm: NightLightConfig = .{
     .enabled = true,
     .temperature = 1700, // Warmest possible, like candlelight
     .schedule_automatic = false, // Always active when applied
@@ -132,26 +130,45 @@ pub const daylight_movie: NightLightConfig = .{
     .schedule_to = 24.0,
 };
 
-// Display mode types.
+// Display effects for color manipulation.
 //
-// Beyond just temperature, we can control color channels and
-// grayscale modes for special purposes.
-pub const DisplayMode = enum {
-    normal, // Standard color display
-    monochrome, // Grayscale only (no color)
-    red_green, // Red and green only, no blue (accessibility/colorblind)
+// Multiple effects can be combined; absence of any effect is equivalent to
+// "normal" mode.
+pub const DisplayEffect = enum {
+    monochrome,
+    red_green,
 };
 
-// Full display configuration including color mode.
+pub const DisplayEffects = struct {
+    monochrome: bool = false,
+    red_green: bool = false,
+
+    pub fn isNormal(self: DisplayEffects) bool {
+        return !self.monochrome and !self.red_green;
+    }
+
+    pub fn enable(self: *DisplayEffects, effect: DisplayEffect) void {
+        switch (effect) {
+            .monochrome => self.monochrome = true,
+            .red_green => self.red_green = true,
+        }
+    }
+
+    pub fn clear(self: *DisplayEffects) void {
+        self.* = DisplayEffects{};
+    }
+};
+
+// Full display configuration including color effects.
 //
-// This extends Night Light with additional display modes
-// for specialized use cases.
+// This extends Night Light with additional display effects for
+// specialized use cases.
 pub const DisplayConfig = struct {
     // Night Light settings (temperature-based warmth)
     night_light: NightLightConfig = default_warm,
 
-    // Color mode selection
-    mode: DisplayMode = .normal,
+    // Color effects selection (monochrome/red-green)
+    effects: DisplayEffects = .{},
 
     // For red-green mode: adjust red channel (0.0-1.0, default 1.0 = max)
     red_intensity: f32 = 1.0,
