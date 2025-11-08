@@ -27,6 +27,9 @@ pub fn build(b: *std.Build) void {
 
     const run_cli = b.addRunArtifact(cli_exe);
     run_cli.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_cli.addArgs(args);
+    }
 
     const run_step = b.step("run", "Run the CLI");
     run_step.dependOn(&run_cli.step);
@@ -48,4 +51,3 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run graindisplay tests");
     test_step.dependOn(&run_tests.step);
 }
-

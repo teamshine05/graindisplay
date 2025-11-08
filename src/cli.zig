@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const graindisplay = @import("graindisplay.zig");
+const config = @import("config.zig");
 
 // Command line options for graindisplay.
 //
@@ -105,17 +106,9 @@ fn parse_args_list(
 fn parse_args(
     allocator: std.mem.Allocator,
 ) !?Options {
-    var args_iter = try std.process.argsWithAllocator(allocator);
-    defer args_iter.deinit();
-
-    var list = std.ArrayList([]const u8).init(allocator);
-    defer list.deinit();
-
-    while (args_iter.next()) |arg| {
-        try list.append(arg);
-    }
-
-    return try parse_args_list(allocator, list.items);
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+    return try parse_args_list(allocator, args);
 }
 
 // Print usage information.
@@ -233,7 +226,7 @@ fn run_interactive(
     }
 
     // Apply the configuration
-    const config = graindisplay.NightLightConfig{
+    const interactive_config = graindisplay.NightLightConfig{
         .enabled = enabled,
         .temperature = temperature,
         .schedule_automatic = current.schedule_automatic,
@@ -241,7 +234,7 @@ fn run_interactive(
         .schedule_to = current.schedule_to,
     };
 
-    try client.applyNightLight(config);
+    try client.applyNightLight(interactive_config);
     if (interface_changed) {
         try client.applyInterface(interface_config);
     }
@@ -259,39 +252,39 @@ fn writeStr(fd: std.posix.fd_t, str: []const u8) !void {
 // Show full current configuration.
 fn show_full(allocator: std.mem.Allocator, client: *graindisplay.Client) !void {
     const stdout_fd = std.posix.STDOUT_FILENO;
-    const config = try client.readNightLight();
+    const current_config = try client.readNightLight();
     const interface_config = try client.readInterface();
 
     try writeStr(stdout_fd, "Current Night Light Configuration:\n");
-    const enabled_line = try std.fmt.allocPrint(allocator, "  Enabled: {}\n", .{config.enabled});
+    const enabled_line = try std.fmt.allocPrint(allocator, "  Enabled: {}\n", .{current_config.enabled});
     defer allocator.free(enabled_line);
     try writeStr(stdout_fd, enabled_line);
 
-    const temp_prefix = try std.fmt.allocPrint(allocator, "  Temperature: {}K (", .{config.temperature});
+    const temp_prefix = try std.fmt.allocPrint(allocator, "  Temperature: {}K (", .{current_config.temperature});
     defer allocator.free(temp_prefix);
     try writeStr(stdout_fd, temp_prefix);
 
-    if (config.temperature <= 2500) {
+    if (current_config.temperature <= 2500) {
         try writeStr(stdout_fd, "very warm");
-    } else if (config.temperature <= 3000) {
+    } else if (current_config.temperature <= 3000) {
         try writeStr(stdout_fd, "warm");
-    } else if (config.temperature <= 4000) {
+    } else if (current_config.temperature <= 4000) {
         try writeStr(stdout_fd, "moderate");
     } else {
         try writeStr(stdout_fd, "cool");
     }
     try writeStr(stdout_fd, ")\n");
 
-    const schedule_auto = try std.fmt.allocPrint(allocator, "  Schedule automatic: {}\n", .{config.schedule_automatic});
+    const schedule_auto = try std.fmt.allocPrint(allocator, "  Schedule automatic: {}\n", .{current_config.schedule_automatic});
     defer allocator.free(schedule_auto);
     try writeStr(stdout_fd, schedule_auto);
 
-    if (!config.schedule_automatic) {
-        const from_line = try std.fmt.allocPrint(allocator, "  Schedule from: {d:.1}h\n", .{config.schedule_from});
+    if (!current_config.schedule_automatic) {
+        const from_line = try std.fmt.allocPrint(allocator, "  Schedule from: {d:.1}h\n", .{current_config.schedule_from});
         defer allocator.free(from_line);
         try writeStr(stdout_fd, from_line);
 
-        const to_line = try std.fmt.allocPrint(allocator, "  Schedule to: {d:.1}h\n", .{config.schedule_to});
+        const to_line = try std.fmt.allocPrint(allocator, "  Schedule to: {d:.1}h\n", .{current_config.schedule_to});
         defer allocator.free(to_line);
         try writeStr(stdout_fd, to_line);
     }
@@ -326,20 +319,14 @@ pub fn main() !void {
     };
     var interface_config = try client.readInterface();
 
+    if (try config.loadDefault(allocator)) |preferences| {
+        applyPreferences(&display_config, &interface_config, preferences);
+    }
+
     // Apply preset if specified
     if (opts.preset) |preset| {
-        if (std.mem.eql(u8, preset, "default-warm")) {
-            display_config.night_light = graindisplay.default_warm;
-        } else if (std.mem.eql(u8, preset, "very-warm")) {
-            display_config.night_light = graindisplay.very_warm;
-        } else if (std.mem.eql(u8, preset, "moderate-warm")) {
-            display_config.night_light = graindisplay.moderate_warm;
-        } else if (std.mem.eql(u8, preset, "warmer")) {
-            display_config.night_light = graindisplay.warmer;
-        } else if (std.mem.eql(u8, preset, "most-warm")) {
-            display_config.night_light = graindisplay.most_warm;
-        } else if (std.mem.eql(u8, preset, "daylight-movie")) {
-            display_config.night_light = graindisplay.daylight_movie;
+        if (presetByName(preset)) |resolved| {
+            display_config.night_light = resolved;
         } else {
             std.debug.print("Unknown preset: {s}\n", .{preset});
             std.debug.print("Available presets: default-warm, very-warm, warmer, most-warm, moderate-warm, daylight-movie\n", .{});
@@ -379,6 +366,50 @@ pub fn main() !void {
     }
 }
 
+fn presetByName(name: []const u8) ?graindisplay.NightLightConfig {
+    if (std.mem.eql(u8, name, "default-warm")) return graindisplay.default_warm;
+    if (std.mem.eql(u8, name, "very-warm")) return graindisplay.very_warm;
+    if (std.mem.eql(u8, name, "moderate-warm")) return graindisplay.moderate_warm;
+    if (std.mem.eql(u8, name, "warmer")) return graindisplay.warmer;
+    if (std.mem.eql(u8, name, "most-warm")) return graindisplay.most_warm;
+    if (std.mem.eql(u8, name, "daylight-movie")) return graindisplay.daylight_movie;
+    return null;
+}
+
+fn applyPreferences(
+    display_config: *graindisplay.DisplayConfig,
+    interface_config: *graindisplay.InterfaceConfig,
+    preferences: config.Preference,
+) void {
+    if (preferences.preset) |preset| {
+        const resolved = switch (preset) {
+            .default_warm => graindisplay.default_warm,
+            .very_warm => graindisplay.very_warm,
+            .moderate_warm => graindisplay.moderate_warm,
+            .warmer => graindisplay.warmer,
+            .most_warm => graindisplay.most_warm,
+            .daylight_movie => graindisplay.daylight_movie,
+        };
+        display_config.night_light = resolved;
+    }
+
+    if (preferences.temperature) |value| {
+        display_config.night_light.temperature = value;
+    }
+
+    if (preferences.enable) |value| {
+        display_config.night_light.enabled = value;
+    }
+
+    if (preferences.mode) |mode| {
+        display_config.mode = mode;
+    }
+
+    if (preferences.font_scale) |scale| {
+        interface_config.text_scale = scale;
+    }
+}
+
 test "parse args list handles font scale" {
     const args = [_][]const u8{ "graindisplay", "--font-scale", "1.75", "--enable" };
     const opts = try parse_args_list(std.testing.allocator, &args);
@@ -394,4 +425,9 @@ test "parse args list handles presets and shortcuts" {
     try std.testing.expectEqualStrings("most-warm", opts.preset.?);
     try std.testing.expect(opts.font_scale != null);
     try std.testing.expectEqual(@as(f64, 1.75), opts.font_scale.?);
+}
+
+test "preset lookup by name" {
+    try std.testing.expect(presetByName("most-warm") != null);
+    try std.testing.expect(presetByName("unknown") == null);
 }

@@ -222,6 +222,33 @@ zig build
 zig build run -- --help
 ```
 
+## configuration
+
+We ship a template at `config/graindisplay.example.cfg`. Copy it to
+`~/.config/graindisplay/config.cfg` (the directory is ignored by git) and adjust
+the values you want the CLI to use by default:
+
+```
+mkdir -p ~/.config/graindisplay
+cp config/graindisplay.example.cfg ~/.config/graindisplay/config.cfg
+```
+
+Supported keys:
+- `preset` – one of `default-warm`, `very-warm`, `warmer`, `most-warm`,
+  `moderate-warm`, `daylight-movie`
+- `temperature` – Kelvin override (integer)
+- `enable` – `true` or `false`
+- `mode` – `normal`, `monochrome`, or `red-green`
+- `font_scale` – Wayland scaling factor such as `1.75`
+
+Command-line flags always override config values. With the build script forwarding
+arguments you can now run:
+
+```
+zig build run -- --font-scale-175
+zig build run -- --preset very-warm
+```
+
 ## testing
 
 See `docs/tests.md` for an overview of our unit, integration, and randomized

@@ -18,6 +18,8 @@ command runners and do not touch live `gsettings`.
   small helpers without any command execution.
 - **unit tests (mocked gsettings)** – the `gsettings.Client` is exercised with a
   fake `CommandRunner` that records the commands we would send to GNOME.
+- **configuration parsing** – `src/config.zig` tests parse the simple
+  `key=value` format used by the optional dotfile.
 - **integration tests (system config)** – apply/read the combined
   `SystemConfig`, ensuring display + interface commands run in the expected
   order.
