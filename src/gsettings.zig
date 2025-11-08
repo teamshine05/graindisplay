@@ -10,6 +10,11 @@
 
 const std = @import("std");
 const types = @import("types.zig");
+const wayland_effects = @import("wayland/effects.zig");
+
+var effects_client: ?wayland_effects.EffectsClient = null;
+var effects_init_attempted: bool = false;
+var effects_warning_shown: bool = false;
 
 const COLOR_SCHEMA = "org.gnome.settings-daemon.plugins.color";
 const INTERFACE_SCHEMA = "org.gnome.desktop.interface";
@@ -156,13 +161,56 @@ pub const Client = struct {
     pub fn applyDisplay(self: *Client, config: types.DisplayConfig) !void {
         try self.applyNightLight(config.night_light);
 
-        if (config.effects.monochrome) {
-            // TODO: Implement monochrome via Wayland color management protocols
-            // e.g., gamma LUT adjustments.
+        if (config.effects.isNormal()) {
+            if (effects_client) |*client| {
+                client.reset() catch |err| {
+                    self.warnEffectsError(err, config.effects);
+                };
+            }
+            return;
         }
-        if (config.effects.red_green) {
-            // TODO: Implement red-green filter via Wayland color management protocols.
+
+        const client = self.ensureEffectsClient() catch |err| {
+            self.warnEffectsError(err, config.effects);
+            return;
+        };
+
+        client.apply(config.effects) catch |err| {
+            self.warnEffectsError(err, config.effects);
+        };
+    }
+
+    fn ensureEffectsClient(self: *Client) !*wayland_effects.EffectsClient {
+        if (effects_client) |*client| {
+            return client;
         }
+
+        if (!effects_init_attempted) {
+            effects_init_attempted = true;
+            const client = wayland_effects.EffectsClient.init(self.allocator) catch |err| {
+                return err;
+            };
+            effects_client = client;
+        }
+
+        return &effects_client.?;
+    }
+
+    fn warnEffectsError(self: *Client, err: anyerror, effects: types.DisplayEffects) void {
+        if (effects_warning_shown) return;
+        effects_warning_shown = true;
+
+        var description: []const u8 = if (effects.isNormal()) "normal" else "selected";
+        var allocated = false;
+        if (!effects.isNormal()) {
+            if (wayland_effects.describeEffects(self.allocator, effects)) |desc| {
+                description = desc;
+                allocated = true;
+            } else |_| {}
+        }
+        defer if (allocated) self.allocator.free(@constCast(description));
+
+        std.log.warn("wayland gamma control unavailable ({s}); effects {s} skipped", .{ @errorName(err), description });
     }
 
     pub fn readInterface(self: *Client) !types.InterfaceConfig {

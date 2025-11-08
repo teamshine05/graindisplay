@@ -113,7 +113,7 @@ zig build run -- --mode monochrome --mode red-green
 zig build run -- --mode normal
 ```
 
-You can pass `--mode` multiple times to combine effects. Use `--mode normal` (or `--mode none`) to clear all effects before applying new ones. The config file accepts comma-separated values, e.g. `mode = monochrome, red-green`.
+You can pass `--mode` multiple times to combine effects. Use `--mode normal` (or `--mode none`) to clear all effects before applying new ones. The config file accepts comma-separated values, e.g. `mode = monochrome, red-green`. Gamma control requires compositor support; if unavailable, graindisplay logs a warning and skips the effect.
 
 ### set text scaling (Wayland GNOME)
 
